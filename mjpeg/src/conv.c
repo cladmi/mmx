@@ -29,9 +29,10 @@
  * 2 : version déroulée toujours en C
  * 3 : Chargement dans mmx
  * 4 : soustraction 128 par packets
- * 5 : calcul de RGB
+ * 5 : calcul de R
+ * 6 : calcul de GB
  */
-#define VERSION 5
+#define VERSION 6
 #define DEBUG
 
 
@@ -561,6 +562,455 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                                 printf("\n");
                         }
 #endif
+
+                }
+        }
+}
+#endif
+#if VERSION == 5
+
+
+void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, uint32_t nb_MCU_V)
+{
+        uint8_t *MCU_Y, *MCU_Cr, *MCU_Cb;
+        uint8_t index, i, j, idx;
+        int32_t R[4], G[4], B[4];
+        uint32_t ARGB[4];
+        // Soustraction de 128 sur chacun des 16bits d'un registre mmx
+        const uint64_t magic_substract = 0x0080008000800080;
+        // Constante de multiplication
+        //
+        // R : 359 donc 0x0167 0167 0167 0167
+        const uint64_t R_mult_constant = 0x0167016701670167;
+        // G(Cr) : 183 donc 0x00b7 00b7 00b7 00b7
+        const uint64_t G_cr_mult_constant = 0x00b700b700b700b7;
+        // G(Cb) : 88 donc 0x0058 0058 0058 0058 
+        const uint64_t G_cb_mult_constant = 0x0058005800580058;
+        // B(Cb) : 455 donc 0x01c7 01c7 01c7 01c7 
+        const uint64_t B_cb_mult_constant = 0x01c701c701c701c7;
+
+#ifdef VERSION
+        printf("Version %d", VERSION);
+#endif
+#ifdef DEBUG
+        printf(" (debug)\n");
+#else
+        printf("\n");
+#endif
+
+        /* Vide la pile des instructions flottantes */
+        __asm__("emms");
+
+        MCU_Y = YCrCb_MCU[0];
+        MCU_Cr = YCrCb_MCU[2];
+        MCU_Cb = YCrCb_MCU[1];
+
+        for (i = 0; i < 8 * nb_MCU_V; i++) {
+                for (j = 0; j < 8 * nb_MCU_H; j += 4) {
+                        index = i * (8 * nb_MCU_H) + j;
+                        // calcul de référence
+                        for (idx = 0; idx < 4; idx++) {
+                                R[idx] = ((MCU_Y[index + idx] << 8) + 
+                                                (MCU_Cr[index + idx] - 128) * 359) >> 8;
+                                G[idx] = ((MCU_Y[index + idx] << 8) - 
+                                                (MCU_Cr[index + idx] - 128) * 183 - 
+                                                (MCU_Cb[index + idx] - 128) * 88) >> 8;
+                                B[idx] = ((MCU_Y[index + idx] << 8) + 
+                                                (MCU_Cb[index + idx] - 128) * 455) >> 8;
+                                if (R[idx] > 255)
+                                        R[idx] = 255;
+                                if (G[idx] > 255)
+                                        G[idx] = 255;
+                                if (B[idx] > 255)
+                                        B[idx] = 255;
+                                if (R[idx] < 0)
+                                        R[idx] = 0;
+                                if (G[idx] < 0)
+                                        G[idx] = 0;
+                                if (B[idx] < 0)
+                                        B[idx] = 0;
+                                ARGB[idx] = ((R[idx] & 0xff) << 16) | 
+                                        ((G[idx] & 0xff) << 8) | 
+                                        (B[idx] & 0xff);
+                                RGB_MCU[index + idx] = ARGB[idx];
+                        }
+                        
+                        // 0x00 | MCU_Y[index + 3] | 0x00 | MCU_Y[index + 2] | 0x00 | MCU_Y[index + 1] | 0x00 | MCU_Y[index + 0] -> %mm0
+                        // passage des valeurs des Y en poids fort 
+                        // (le calcul de RGB nécessite Y << 8 
+                        //  donc comme ça, c'est déjà fait !)
+                        __asm__("pxor %mm0, %mm0");
+                        __asm__("movq %0, %%mm7"::"m"(MCU_Y[index]));
+                        __asm__("punpcklbw %mm7, %mm0");
+#                       ifdef DEBUG
+                        uint16_t Y[4];
+                        __asm__("movq %%mm0, %0":"=m"(Y[0]));
+                        assert(MCU_Y[index] == Y[0] >> 8);
+                        assert(MCU_Y[index + 1] == Y[1] >> 8);
+                        assert(MCU_Y[index + 2] == Y[2] >> 8);
+                        assert(MCU_Y[index + 3] == Y[3] >> 8);
+#                       endif
+
+
+                        __asm__("pxor %mm7, %mm7");
+                        __asm__("movq %0, %%mm1"::"m"(MCU_Cr[index]));
+                        __asm__("punpcklbw %mm7, %mm1");
+#                       ifdef DEBUG
+                        // test du chargement de Cr dans mm1
+                        uint16_t Cr[4];
+                        __asm__("movq %%mm1, %0":"=m"(Cr[0]));
+                        assert(MCU_Cr[index] == Cr[0]);
+                        assert(MCU_Cr[index + 1] == Cr[1]);
+                        assert(MCU_Cr[index + 2] == Cr[2]);
+                        assert(MCU_Cr[index + 3] == Cr[3]);
+#                       endif
+                        // soustraction
+                        __asm__("psubw %0, %%mm1"::"m"(magic_substract));
+#                       ifdef DEBUG
+                        // test après soustraction
+                        __asm__("movq %%mm1, %0":"=m"(Cr[0]));
+                        assert((uint16_t) (MCU_Cr[index] - 128) == Cr[0]);
+                        assert((uint16_t) (MCU_Cr[index + 1] - 128) == Cr[1]);
+                        assert((uint16_t) (MCU_Cr[index + 2] - 128) == Cr[2]);
+                        assert((uint16_t) (MCU_Cr[index + 3] - 128) == Cr[3]);
+#                       endif
+
+                        __asm__("movq %0, %%mm2"::"m"(MCU_Cb[index]));
+                        __asm__("punpcklbw %mm7, %mm2");
+#                       ifdef DEBUG
+                        // test du chargement de Cb dans mm2
+                        uint16_t Cb[4];
+                        __asm__("movq %%mm2, %0":"=m"(Cb[0]));
+                        assert(MCU_Cb[index] == Cb[0]);
+                        assert(MCU_Cb[index + 1] == Cb[1]);
+                        assert(MCU_Cb[index + 2] == Cb[2]);
+                        assert(MCU_Cb[index + 3] == Cb[3]);
+#                       endif
+                        // soustraction
+                        __asm__("psubw %0, %%mm2"::"m"(magic_substract));
+#                       ifdef DEBUG
+                        // test après soustraction
+                        __asm__("movq %%mm2, %0":"=m"(Cb[0]));
+                        assert((uint16_t) (MCU_Cb[index] - 128)== Cb[0]);
+                        assert((uint16_t) (MCU_Cb[index + 1] - 128) == Cb[1]);
+                        assert((uint16_t) (MCU_Cb[index + 2] - 128) == Cb[2]);
+                        assert((uint16_t) (MCU_Cb[index + 3] - 128) == Cb[3]);
+#                       endif
+
+
+                        // Calcul de R
+                        // R = ((Y << 8) + (Cr - 128) * 359) >> 8
+                        // R = (  (MM0)  +    (MM1)   * 359) >> 8
+                        //
+                        // MM3 <- MM1 * 359
+                        // MM3 <- MM3 + MM0
+                        // shift MM3
+                        
+                        // multiplication
+                        __asm__("movq %mm1, %mm3");
+#ifdef DEBUG
+                        uint64_t mm1;
+                        __asm__("movq %%mm3, %0":"=m"(mm1));
+                        uint64_t mm1_theorique = to_mmx_register(
+                                        MCU_Cr[index + 3] - 128,
+                                        MCU_Cr[index + 2] - 128,
+                                        MCU_Cr[index + 1] - 128,
+                                        MCU_Cr[index + 0] - 128);
+                        assert(mm1 == mm1_theorique);
+#endif
+                        __asm__("pmullw %0, %%mm3"::"m"(R_mult_constant));
+#ifdef DEBUG
+                        uint64_t mult_after;
+                        __asm__("movq %%mm3, %0":"=m"(mult_after));
+                        uint64_t mult_after_theorique = to_mmx_register(
+                                        (MCU_Cr[index + 3] - 128) * 359,
+                                        (MCU_Cr[index + 2] - 128) * 359,
+                                        (MCU_Cr[index + 1] - 128) * 359,
+                                        (MCU_Cr[index + 0] - 128) * 359);
+                        assert(mult_after == mult_after_theorique);
+#endif
+                        // addition
+#ifdef DEBUG
+                        uint64_t mm0;
+                        __asm__("movq %%mm0, %0":"=m"(mm0));
+                        uint64_t mm0_theorique = to_mmx_register(
+                                        (MCU_Y[index + 3]) << 8,
+                                        (MCU_Y[index + 2]) << 8,
+                                        (MCU_Y[index + 1]) << 8,
+                                        (MCU_Y[index + 0]) << 8);
+                        assert(mm0 == mm0_theorique);
+#endif
+                        __asm__("paddw %mm0, %mm3");
+#ifdef DEBUG
+                        uint64_t add_after;
+                        __asm__("movq %%mm3, %0":"=m"(add_after));
+                        uint64_t add_after_theorique = to_mmx_register(
+                                        ((MCU_Y[index + 3]) << 8) + ((MCU_Cr[index + 3] - 128) * 359),
+                                        ((MCU_Y[index + 2]) << 8) + ((MCU_Cr[index + 2] - 128) * 359),
+                                        ((MCU_Y[index + 1]) << 8) + ((MCU_Cr[index + 1] - 128) * 359),
+                                        ((MCU_Y[index + 0]) << 8) + ((MCU_Cr[index + 0] - 128) * 359));
+                        if (add_after != add_after_theorique) {
+                                printf("addt 0x%016"PRIx64" + 0x%016"PRIx64" = 0x%016"PRIx64"\n",
+                                                mult_after_theorique,
+                                                mm0_theorique,
+                                                add_after_theorique);
+                                printf("addm 0x%016"PRIx64" + 0x%016"PRIx64" = 0x%016"PRIx64"\n",
+                                                mult_after,
+                                                mm0,
+                                                add_after);
+                                printf("\n");
+                                assert(0);
+                        }
+#endif
+                        // shift
+                        __asm__("psrlw $8, %mm3");
+#ifdef DEBUG
+                        uint64_t shift_after;
+                        __asm__("movq %%mm3, %0":"=m"(shift_after));
+                        uint64_t shift_after_theorique = to_mmx_register(
+                                ((((MCU_Y[index + 3]) << 8) + ((MCU_Cr[index + 3] - 128) * 359)) >> 8) & 255,
+                                ((((MCU_Y[index + 2]) << 8) + ((MCU_Cr[index + 2] - 128) * 359)) >> 8) & 255,
+                                ((((MCU_Y[index + 1]) << 8) + ((MCU_Cr[index + 1] - 128) * 359)) >> 8) & 255,
+                                ((((MCU_Y[index + 0]) << 8) + ((MCU_Cr[index + 0] - 128) * 359)) >> 8) & 255);
+                        if (shift_after != shift_after_theorique) {
+                                printf("t 0x%016"PRIx64" >> 8 = 0x%016"PRIx64"\n",
+                                                add_after_theorique,
+                                                shift_after_theorique);
+                                printf("m 0x%016"PRIx64" >> 8 = 0x%016"PRIx64"\n",
+                                                add_after,
+                                                shift_after);
+                                printf("\n");
+                        }
+#endif
+
+                }
+        }
+}
+#endif
+#if VERSION == 6
+
+
+void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, uint32_t nb_MCU_V)
+{
+        uint8_t *MCU_Y, *MCU_Cr, *MCU_Cb;
+        uint8_t index, i, j, idx;
+        int32_t R[4], G[4], B[4];
+        uint32_t ARGB[4];
+        // Soustraction de 128 sur chacun des 16bits d'un registre mmx
+        const uint64_t magic_substract = 0x0080008000800080;
+        // Constante de multiplication
+        //
+        // R : 359 donc 0x0167 0167 0167 0167
+        const uint64_t R_mult_constant = 0x0167016701670167;
+        // G(Cr) : 183 donc 0x00b7 00b7 00b7 00b7
+        const uint64_t G_cr_mult_constant = 0x00b700b700b700b7;
+        // G(Cb) : 88 donc 0x0058 0058 0058 0058 
+        const uint64_t G_cb_mult_constant = 0x0058005800580058;
+        // B(Cb) : 455 donc 0x01c7 01c7 01c7 01c7 
+        const uint64_t B_cb_mult_constant = 0x01c701c701c701c7;
+
+#ifdef VERSION
+        printf("Version %d", VERSION);
+#endif
+#ifdef DEBUG
+        printf(" (debug)\n");
+#else
+        printf("\n");
+#endif
+
+        /* Vide la pile des instructions flottantes */
+        __asm__("emms");
+
+        MCU_Y = YCrCb_MCU[0];
+        MCU_Cr = YCrCb_MCU[2];
+        MCU_Cb = YCrCb_MCU[1];
+
+        for (i = 0; i < 8 * nb_MCU_V; i++) {
+                for (j = 0; j < 8 * nb_MCU_H; j += 4) {
+                        index = i * (8 * nb_MCU_H) + j;
+                        // calcul de référence
+                        for (idx = 0; idx < 4; idx++) {
+                                R[idx] = ((MCU_Y[index + idx] << 8) + 
+                                                (MCU_Cr[index + idx] - 128) * 359) >> 8;
+                                G[idx] = ((MCU_Y[index + idx] << 8) - 
+                                                (MCU_Cr[index + idx] - 128) * 183 - 
+                                                (MCU_Cb[index + idx] - 128) * 88) >> 8;
+                                B[idx] = ((MCU_Y[index + idx] << 8) + 
+                                                (MCU_Cb[index + idx] - 128) * 455) >> 8;
+                                if (R[idx] > 255)
+                                        R[idx] = 255;
+                                if (G[idx] > 255)
+                                        G[idx] = 255;
+                                if (B[idx] > 255)
+                                        B[idx] = 255;
+                                if (R[idx] < 0)
+                                        R[idx] = 0;
+                                if (G[idx] < 0)
+                                        G[idx] = 0;
+                                if (B[idx] < 0)
+                                        B[idx] = 0;
+                                ARGB[idx] = ((R[idx] & 0xff) << 16) | 
+                                        ((G[idx] & 0xff) << 8) | 
+                                        (B[idx] & 0xff);
+                                RGB_MCU[index + idx] = ARGB[idx];
+                        }
+                        
+                        // 0x00 | MCU_Y[index + 3] | 0x00 | MCU_Y[index + 2] | 0x00 | MCU_Y[index + 1] | 0x00 | MCU_Y[index + 0] -> %mm0
+                        // passage des valeurs des Y en poids fort 
+                        // (le calcul de RGB nécessite Y << 8 
+                        //  donc comme ça, c'est déjà fait !)
+                        __asm__("pxor %mm0, %mm0");
+                        __asm__("movq %0, %%mm7"::"m"(MCU_Y[index]));
+                        __asm__("punpcklbw %mm7, %mm0");
+#                       ifdef DEBUG
+                        uint16_t Y[4];
+                        __asm__("movq %%mm0, %0":"=m"(Y[0]));
+                        assert(MCU_Y[index] == Y[0] >> 8);
+                        assert(MCU_Y[index + 1] == Y[1] >> 8);
+                        assert(MCU_Y[index + 2] == Y[2] >> 8);
+                        assert(MCU_Y[index + 3] == Y[3] >> 8);
+#                       endif
+
+
+                        __asm__("pxor %mm7, %mm7");
+                        __asm__("movq %0, %%mm1"::"m"(MCU_Cr[index]));
+                        __asm__("punpcklbw %mm7, %mm1");
+#                       ifdef DEBUG
+                        // test du chargement de Cr dans mm1
+                        uint16_t Cr[4];
+                        __asm__("movq %%mm1, %0":"=m"(Cr[0]));
+                        assert(MCU_Cr[index] == Cr[0]);
+                        assert(MCU_Cr[index + 1] == Cr[1]);
+                        assert(MCU_Cr[index + 2] == Cr[2]);
+                        assert(MCU_Cr[index + 3] == Cr[3]);
+#                       endif
+                        // soustraction
+                        __asm__("psubw %0, %%mm1"::"m"(magic_substract));
+#                       ifdef DEBUG
+                        // test après soustraction
+                        __asm__("movq %%mm1, %0":"=m"(Cr[0]));
+                        assert((uint16_t) (MCU_Cr[index] - 128) == Cr[0]);
+                        assert((uint16_t) (MCU_Cr[index + 1] - 128) == Cr[1]);
+                        assert((uint16_t) (MCU_Cr[index + 2] - 128) == Cr[2]);
+                        assert((uint16_t) (MCU_Cr[index + 3] - 128) == Cr[3]);
+#                       endif
+
+                        __asm__("movq %0, %%mm2"::"m"(MCU_Cb[index]));
+                        __asm__("punpcklbw %mm7, %mm2");
+#                       ifdef DEBUG
+                        // test du chargement de Cb dans mm2
+                        uint16_t Cb[4];
+                        __asm__("movq %%mm2, %0":"=m"(Cb[0]));
+                        assert(MCU_Cb[index] == Cb[0]);
+                        assert(MCU_Cb[index + 1] == Cb[1]);
+                        assert(MCU_Cb[index + 2] == Cb[2]);
+                        assert(MCU_Cb[index + 3] == Cb[3]);
+#                       endif
+                        // soustraction
+                        __asm__("psubw %0, %%mm2"::"m"(magic_substract));
+#                       ifdef DEBUG
+                        // test après soustraction
+                        __asm__("movq %%mm2, %0":"=m"(Cb[0]));
+                        assert((uint16_t) (MCU_Cb[index] - 128)== Cb[0]);
+                        assert((uint16_t) (MCU_Cb[index + 1] - 128) == Cb[1]);
+                        assert((uint16_t) (MCU_Cb[index + 2] - 128) == Cb[2]);
+                        assert((uint16_t) (MCU_Cb[index + 3] - 128) == Cb[3]);
+#                       endif
+
+
+                        // Calcul de R
+                        // R = ((Y << 8) + (Cr - 128) * 359) >> 8
+                        // R = (  (MM0)  +    (MM1)   * 359) >> 8
+                        //
+                        // MM3 <- MM1 * 359
+                        // MM3 <- MM3 + MM0
+                        // shift MM3
+                        
+                        // multiplication
+                        __asm__("movq %mm1, %mm3");
+#ifdef DEBUG
+                        uint64_t mm1;
+                        __asm__("movq %%mm3, %0":"=m"(mm1));
+                        uint64_t mm1_theorique = to_mmx_register(
+                                        MCU_Cr[index + 3] - 128,
+                                        MCU_Cr[index + 2] - 128,
+                                        MCU_Cr[index + 1] - 128,
+                                        MCU_Cr[index + 0] - 128);
+                        assert(mm1 == mm1_theorique);
+#endif
+                        __asm__("pmullw %0, %%mm3"::"m"(R_mult_constant));
+#ifdef DEBUG
+                        uint64_t mult_after;
+                        __asm__("movq %%mm3, %0":"=m"(mult_after));
+                        uint64_t mult_after_theorique = to_mmx_register(
+                                        (MCU_Cr[index + 3] - 128) * 359,
+                                        (MCU_Cr[index + 2] - 128) * 359,
+                                        (MCU_Cr[index + 1] - 128) * 359,
+                                        (MCU_Cr[index + 0] - 128) * 359);
+                        assert(mult_after == mult_after_theorique);
+#endif
+                        // addition
+#ifdef DEBUG
+                        uint64_t mm0;
+                        __asm__("movq %%mm0, %0":"=m"(mm0));
+                        uint64_t mm0_theorique = to_mmx_register(
+                                        (MCU_Y[index + 3]) << 8,
+                                        (MCU_Y[index + 2]) << 8,
+                                        (MCU_Y[index + 1]) << 8,
+                                        (MCU_Y[index + 0]) << 8);
+                        assert(mm0 == mm0_theorique);
+#endif
+                        __asm__("paddw %mm0, %mm3");
+#ifdef DEBUG
+                        uint64_t add_after;
+                        __asm__("movq %%mm3, %0":"=m"(add_after));
+                        uint64_t add_after_theorique = to_mmx_register(
+                                        ((MCU_Y[index + 3]) << 8) + ((MCU_Cr[index + 3] - 128) * 359),
+                                        ((MCU_Y[index + 2]) << 8) + ((MCU_Cr[index + 2] - 128) * 359),
+                                        ((MCU_Y[index + 1]) << 8) + ((MCU_Cr[index + 1] - 128) * 359),
+                                        ((MCU_Y[index + 0]) << 8) + ((MCU_Cr[index + 0] - 128) * 359));
+                        if (add_after != add_after_theorique) {
+                                printf("addt 0x%016"PRIx64" + 0x%016"PRIx64" = 0x%016"PRIx64"\n",
+                                                mult_after_theorique,
+                                                mm0_theorique,
+                                                add_after_theorique);
+                                printf("addm 0x%016"PRIx64" + 0x%016"PRIx64" = 0x%016"PRIx64"\n",
+                                                mult_after,
+                                                mm0,
+                                                add_after);
+                                printf("\n");
+                                assert(0);
+                        }
+#endif
+                        // shift
+                        __asm__("psrlw $8, %mm3");
+#ifdef DEBUG
+                        uint64_t shift_after;
+                        __asm__("movq %%mm3, %0":"=m"(shift_after));
+                        uint64_t shift_after_theorique = to_mmx_register(
+                                ((((MCU_Y[index + 3]) << 8) + ((MCU_Cr[index + 3] - 128) * 359)) >> 8) & 255,
+                                ((((MCU_Y[index + 2]) << 8) + ((MCU_Cr[index + 2] - 128) * 359)) >> 8) & 255,
+                                ((((MCU_Y[index + 1]) << 8) + ((MCU_Cr[index + 1] - 128) * 359)) >> 8) & 255,
+                                ((((MCU_Y[index + 0]) << 8) + ((MCU_Cr[index + 0] - 128) * 359)) >> 8) & 255);
+                        if (shift_after != shift_after_theorique) {
+                                printf("t 0x%016"PRIx64" >> 8 = 0x%016"PRIx64"\n",
+                                                add_after_theorique,
+                                                shift_after_theorique);
+                                printf("m 0x%016"PRIx64" >> 8 = 0x%016"PRIx64"\n",
+                                                add_after,
+                                                shift_after);
+                                printf("\n");
+                        }
+#endif
+
+                        // Calcul de G
+
+
+
+
+
+
+                        // Calcul de B
 
                 }
         }
