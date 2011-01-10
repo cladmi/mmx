@@ -713,6 +713,7 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                         assert(mm1 == mm1_theorique);
 #endif
                         __asm__("pmullw %0, %%mm3"::"m"(R_mult_constant));
+                        __asm__("pmulhw %0, %%mm6"::"m"(R_mult_constant));
 #ifdef DEBUG
                         uint64_t mult_after;
                         __asm__("movq %%mm3, %0":"=m"(mult_after));
@@ -723,6 +724,12 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                                         (MCU_Cr[index + 0] - 128) * 359);
                         assert(mult_after == mult_after_theorique);
 #endif
+			// on passe les 64bits sur 2 doubles
+			__asm__("movq %mm3, %mm7");
+			__asm__("punpcklwd %mm6, %mm3"); // low
+			__asm__("punpckhwd %mm6, %mm7"); // high
+
+
                         // addition
 #ifdef DEBUG
                         uint64_t mm0;
@@ -735,6 +742,8 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                         assert(mm0 == mm0_theorique);
 #endif
                         __asm__("paddw %mm0, %mm3");
+			// TODO
+			// là on devrait ajouter les long avec les long de mm0 qu'on aurait punché
 #ifdef DEBUG
                         uint64_t add_after;
                         __asm__("movq %%mm3, %0":"=m"(add_after));
