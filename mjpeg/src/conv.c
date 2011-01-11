@@ -738,6 +738,7 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
 			 * 	On fait G en premier car on a besoin de plus de registres pour le calculer
 			 */
 
+			printf("Calcul de G\n");
                         /*
 			 * * * * * * * *
 			 * Calcul de G *
@@ -781,6 +782,7 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                                         (MCU_Cr[index + 1] - 128) * 183,
                                         (MCU_Cr[index + 0] - 128) * 183);
                         assert(mult_after == mult_after_theorique);
+			printf("Mutl_the vaut  0x%016"PRIx64"\n", mult_after_theorique);
 #endif
 			// on va passer sur 4 entiers de 32 bits
 			__asm__("movq %mm4, %mm5");
@@ -819,6 +821,7 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                                         (MCU_Cb[index + 1] - 128) * 88,
                                         (MCU_Cb[index + 0] - 128) * 88);
                         assert(mult_after == mult_after_theorique);
+			printf("Mutl_the vaut  0x%016"PRIx64"\n", mult_after_theorique);
 #endif
 			// on va passer sur 4 entiers de 32 bits
 			// On va utiliser mm3 comme temporaire
@@ -829,26 +832,86 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
 			__asm__("movq %mm3, %mm7");
 
 
+			printf("\n");
 			// on va additionner
 			__asm__("paddsw %mm4, %mm6");
 			__asm__("paddsw %mm5, %mm7");
 
-
-
-			// on fait le décalage arithmétique à droite de 8
-			__asm__("psrad $8, %mm6");
-			__asm__("psrad $8, %mm7");
-			// on va repasser sur 16 bits
-			__asm__("packssdw %mm7, %mm6");
+#ifdef DEBUG
                         __asm__("movq %%mm6, %0":"=m"(temp));
+			printf("Sum == 0x%016"PRIx64"\n", temp);
+                        __asm__("movq %%mm7, %0":"=m"(temp));
+			printf("Sum == 0x%016"PRIx64"\n", temp);
+                        add_after = to_mmx_register(
+				  + ((MCU_Cr[index + 3] - 128) * 183)
+				  + ((MCU_Cb[index + 3] - 128) * 88),
+				  + ((MCU_Cr[index + 2] - 128) * 183)
+				  + ((MCU_Cb[index + 2] - 128) * 88),
+				  + ((MCU_Cr[index + 1] - 128) * 183)
+				  + ((MCU_Cb[index + 1] - 128) * 88),
+				  + ((MCU_Cr[index + 0] - 128) * 183)
+				  + ((MCU_Cb[index + 0] - 128) * 88));
+			printf("Sumt = 0x%016"PRIx64"\n", add_after);
+#endif
 
-			printf("mult + mul >> 8 vaut 0x%016"PRIx64"\n", temp);
+			// passage en négatif
+			__asm__("pxor %mm4, %mm4");
+			__asm__("pxor %mm5, %mm5");
+			__asm__("psubd %mm6, %mm4");
+			__asm__("psubd %mm7, %mm5");
 
 
+#ifdef DEBUG
+			// Print de la somme des nombres négatifs
+                        __asm__("movq %%mm4, %0":"=m"(temp));
+			printf("Sub == 0x%016"PRIx64"\n", temp);
+                        __asm__("movq %%mm5, %0":"=m"(temp));
+			printf("Sub == 0x%016"PRIx64"\n", temp);
+                        add_after = to_mmx_register(
+				  - ((MCU_Cr[index + 3] - 128) * 183)
+				  - ((MCU_Cb[index + 3] - 128) * 88),
+				  - ((MCU_Cr[index + 2] - 128) * 183)
+				  - ((MCU_Cb[index + 2] - 128) * 88),
+				  - ((MCU_Cr[index + 1] - 128) * 183)
+				  - ((MCU_Cb[index + 1] - 128) * 88),
+				  - ((MCU_Cr[index + 0] - 128) * 183)
+				  - ((MCU_Cb[index + 0] - 128) * 88));
+			printf("Subt = 0x%016"PRIx64"\n", add_after);
+#endif
+			// on fait le décalage arithmétique à droite de 8
+			__asm__("psrad $8, %mm4");
+			__asm__("psrad $8, %mm5");
 
-                        // soustraction
-			__asm__("movq %mm0, %mm4");
-			__asm__("psubw %mm6, %mm4");
+#ifdef DEBUG
+			// print après décalage
+                        __asm__("movq %%mm4, %0":"=m"(temp));
+			printf("Dec == 0x%016"PRIx64"\n", temp);
+                        __asm__("movq %%mm5, %0":"=m"(temp));
+			printf("Dec == 0x%016"PRIx64"\n", temp);
+#endif
+
+			// on va repasser sur 16 bits
+			__asm__("packssdw %mm5, %mm4");
+
+                        __asm__("movq %%mm4, %0":"=m"(temp));
+			printf("(- (mult + mul)) >> 8 vaut 0x%016"PRIx64"\n", temp);
+                        temp = to_mmx_register(
+                                ((
+				  - ((MCU_Cr[index + 3] - 128) * 183)
+				  - ((MCU_Cb[index + 3] - 128) * 88)) >> 8),
+                                ((
+				  - ((MCU_Cr[index + 2] - 128) * 183)
+				  - ((MCU_Cb[index + 2] - 128) * 88)) >> 8),
+                                ((
+				  - ((MCU_Cr[index + 1] - 128) * 183)
+				  - ((MCU_Cb[index + 1] - 128) * 88)) >> 8),
+                                ((
+				  - ((MCU_Cr[index + 0] - 128) * 183)
+				  - ((MCU_Cb[index + 0] - 128) * 88)) >> 8));
+			printf("(-(mult + mul))>>8_t  vaut 0x%016"PRIx64"\n", temp);
+
+			__asm__("paddsw %mm0, %mm4");
+
 
 #ifdef DEBUG
                         __asm__("movq %%mm0, %0":"=m"(mm0));
@@ -873,13 +936,31 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                                 ((((MCU_Y[index + 0]) << 8)
 				  - ((MCU_Cr[index + 0] - 128) * 183)
 				  - ((MCU_Cb[index + 0] - 128) * 88)) >> 8));
+                        temp = to_mmx_register(
+                                ((MCU_Y[index + 3]) + ((
+				  - ((MCU_Cr[index + 3] - 128) * 183)
+				  - ((MCU_Cb[index + 3] - 128) * 88)) >> 8)),
+                                ((MCU_Y[index + 2]) + ((
+				  - ((MCU_Cr[index + 2] - 128) * 183)
+				  - ((MCU_Cb[index + 2] - 128) * 88)) >> 8)),
+                                ((MCU_Y[index + 1]) + ((
+				  - ((MCU_Cr[index + 1] - 128) * 183)
+				  - ((MCU_Cb[index + 1] - 128) * 88)) >> 8)),
+                                ((MCU_Y[index + 0]) + ((
+				  - ((MCU_Cr[index + 0] - 128) * 183)
+				  - ((MCU_Cb[index + 0] - 128) * 88)) >> 8))
+				);
 
                         if (add_after != result_theorique) {
                                 printf("addt 0x%016"PRIx64" + 0x%016"PRIx64" = 0x%016"PRIx64"\n",
                                                 mult_after_theorique,
                                                 mm0_theorique,
                                                 result_theorique);
-                                printf("addm 0x%016"PRIx64" + 0x%016"PRIx64" = 0x%016"PRIx64"\n",
+                                printf("addn 0x%016"PRIx64" + 0x%016"PRIx64" = 0x%016"PRIx64"\n",
+                                                mult_after_theorique,
+                                                mm0_theorique,
+                                                temp);
+                                printf("addc 0x%016"PRIx64" + 0x%016"PRIx64" = 0x%016"PRIx64"\n",
                                                 mult_after,
                                                 mm0,
                                                 add_after);
@@ -889,6 +970,7 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
 #endif
 
 
+			printf("Calcul de R\n");
                         /*
 			 * * * * * * * *
 			 * Calcul de R *
@@ -946,8 +1028,8 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
 			__asm__("psrad $8, %mm7");
 			// on va repasser sur 16 bits
 			__asm__("packssdw %mm7, %mm3");
-                        __asm__("movq %%mm3, %0":"=m"(temp));
 
+                        __asm__("movq %%mm3, %0":"=m"(temp));
 			printf("mult >> 8 vaut 0x%016"PRIx64"\n", temp);
 
 
