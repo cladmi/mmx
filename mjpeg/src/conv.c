@@ -1658,14 +1658,14 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                         /*
 			 * multiplication
 			 */
-                        __asm__("movq %mm1, %mm5");
+                        __asm__("movq %mm2, %mm5");
 #ifdef DEBUG
                         __asm__("movq %%mm5, %0":"=m"(mm1));
                         mm1_theorique = to_mmx_register(
-                                        MCU_Cr[index + 3] - 128,
-                                        MCU_Cr[index + 2] - 128,
-                                        MCU_Cr[index + 1] - 128,
-                                        MCU_Cr[index + 0] - 128);
+                                        MCU_Cb[index + 3] - 128,
+                                        MCU_Cb[index + 2] - 128,
+                                        MCU_Cb[index + 1] - 128,
+                                        MCU_Cb[index + 0] - 128);
                         assert(mm1 == mm1_theorique);
 #endif
 			__asm__("movq %mm5, %mm6");
@@ -1679,10 +1679,10 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
 #ifdef DEBUG
                         __asm__("movq %%mm5, %0":"=m"(mult_after));
                         mult_after_theorique = to_mmx_register(
-                                        (MCU_Cr[index + 3] - 128) * 455,
-                                        (MCU_Cr[index + 2] - 128) * 455,
-                                        (MCU_Cr[index + 1] - 128) * 455,
-                                        (MCU_Cr[index + 0] - 128) * 455);
+                                        (MCU_Cb[index + 3] - 128) * 455,
+                                        (MCU_Cb[index + 2] - 128) * 455,
+                                        (MCU_Cb[index + 1] - 128) * 455,
+                                        (MCU_Cb[index + 0] - 128) * 455);
                         assert(mult_after == mult_after_theorique);
 #endif
 			// on va passer sur 4 entiers de 32 bits
@@ -1713,10 +1713,10 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
 #ifdef DEBUG
                         __asm__("movq %%mm5, %0":"=m"(add_after));
                         result_theorique = to_mmx_register(
-                                ((((MCU_Y[index + 3]) << 8) + ((MCU_Cr[index + 3] - 128) * 455)) >> 8),
-                                ((((MCU_Y[index + 2]) << 8) + ((MCU_Cr[index + 2] - 128) * 455)) >> 8),
-                                ((((MCU_Y[index + 1]) << 8) + ((MCU_Cr[index + 1] - 128) * 455)) >> 8),
-                                ((((MCU_Y[index + 0]) << 8) + ((MCU_Cr[index + 0] - 128) * 455)) >> 8));
+                                ((((MCU_Y[index + 3]) << 8) + ((MCU_Cb[index + 3] - 128) * 455)) >> 8),
+                                ((((MCU_Y[index + 2]) << 8) + ((MCU_Cb[index + 2] - 128) * 455)) >> 8),
+                                ((((MCU_Y[index + 1]) << 8) + ((MCU_Cb[index + 1] - 128) * 455)) >> 8),
+                                ((((MCU_Y[index + 0]) << 8) + ((MCU_Cb[index + 0] - 128) * 455)) >> 8));
                         if (add_after != result_theorique) {
                                 printf("addt 0x%016"PRIx64" + 0x%016"PRIx64" = 0x%016"PRIx64"\n",
                                                 mult_after_theorique,
