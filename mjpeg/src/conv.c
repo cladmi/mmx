@@ -747,7 +747,7 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                          * G = ((Y << 8) - ((Cr - 128) * 183) - ((Cb - 128) * 88)) >> 8
 			 *
 			 * On dévelloppe le >> 8, car ici c'est autorisé
-                         * R = (MM0)  +  (((MM1) * 359) - ((mm2) * 88)) >> 8
+          *              G = Y - ((MM1 * 183) + (MM2 * 88)) >> 8
                          *
 			 */
 
