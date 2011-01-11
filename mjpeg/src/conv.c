@@ -1942,17 +1942,17 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                         __asm__("packuswb %mm7, %mm4");
                         __asm__("packuswb %mm7, %mm5");
 
-
+                        /* Extraction pour mettre dans MCU_RGB */
                         __asm__("pxor %mm7, %mm7");
+
                         __asm__("punpcklbw %mm7, %mm3");
                         __asm__("punpcklbw %mm4, %mm5");
                         __asm__("movq %mm5, %mm4");
-                        __asm__("punpckhwd %mm3, %mm5");
-                        __asm__("punpcklwd %mm3, %mm4");
-
-                        __asm__("movd %%mm4, %0":"=m"(RGB_MCU[index]));
-                        __asm__("movd %%mm5, %0":"=m"(RGB_MCU[index + 2]));
-
+                        __asm__("punpcklwd %mm3, %mm5");
+                        __asm__("punpckhwd %mm3, %mm4");
+                        __asm__("movq %%mm4, %0":"=m"(RGB_MCU[index + 2]));
+                        __asm__("movq %%mm5, %0":"=m"(RGB_MCU[index]));
+                        
                 }
         }
 }
