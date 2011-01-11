@@ -1762,13 +1762,13 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                         __asm__("movd %%mm4, %0":"=m"(G_mmx[0]));
                         __asm__("movd %%mm5, %0":"=m"(B_mmx[0]));
 
-#if 0
 #ifdef DEBUG
                         int tmp = 0;
                         for (tmp = 0; tmp < 4; tmp++) {
                                 if (R[tmp] != R_mmx[tmp] ||
                                                 G[tmp] != G_mmx[tmp] ||
                                                 B[tmp] != B_mmx[tmp]) {
+#if 0
                                         printf("t R[%d] 0x%04"PRIx8" ", tmp, R[tmp]);
                                         printf("G[%d] 0x%04"PRIx8" ", tmp, G[tmp]);
                                         printf("B[%d] 0x%04"PRIx8" \n", tmp, B[tmp]);
@@ -1807,13 +1807,20 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                                         printf("mm3 : 0x%016"PRIx64" -> 0x%016"PRIx64"\n", mm3_before, mm3_after);
                                         printf("mm4 : 0x%016"PRIx64" -> 0x%016"PRIx64"\n", mm4_before, mm4_after);
                                         printf("mm5 : 0x%016"PRIx64" -> 0x%016"PRIx64"\n", mm5_before, mm5_after);
+
+#endif
+                                        printf("R_the[%d] = 0x%04"PRIx32"\n", tmp, R[tmp]);
+                                        printf("R_mmx[%d] = 0x%04"PRIx32"\n", tmp, R_mmx[tmp]);
+                                        printf("G_the[%d] = 0x%04"PRIx32"\n", tmp, G[tmp]);
+                                        printf("G_mmx[%d] = 0x%04"PRIx32"\n", tmp, G_mmx[tmp]);
+                                        printf("B_the[%d] = 0x%04"PRIx32"\n", tmp, B[tmp]);
+                                        printf("B_mmx[%d] = 0x%04"PRIx32"\n", tmp, B_mmx[tmp]);
                                         printf("\n");
                                 }
                                 //assert(R[tmp] == R_mmx[tmp]);
                                 //assert(G[tmp] == G_mmx[tmp]);
                                 //assert(B[tmp] == B_mmx[tmp]);
                         }
-#endif
 #endif
 
 
