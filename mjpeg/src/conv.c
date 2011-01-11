@@ -34,7 +34,7 @@
  * 7 : récupération de RGB
  * 8 : récupération de MCU_RGB (allégement du débug des étapes précédentes)
  */
-#define VERSION 8
+#define VERSION 7
 #define DEBUG
 
 
@@ -1165,8 +1165,6 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
 }
 #endif
 #if VERSION == 7
-
-
 void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, uint32_t nb_MCU_V)
 {
         uint8_t *MCU_Y, *MCU_Cr, *MCU_Cb;
@@ -1760,9 +1758,23 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                         uint8_t G_mmx[4] = { 0 };
                         uint8_t B_mmx[4] = { 0 };
 
+
+
+
+
+			__asm__("pxor %mm3, %mm3");
+			__asm__("pxor %mm4, %mm4");
+			__asm__("pxor %mm5, %mm5");
+
+
+
+
                         __asm__("movd %%mm3, %0":"=m"(R_mmx[0]));
                         __asm__("movd %%mm4, %0":"=m"(G_mmx[0]));
                         __asm__("movd %%mm5, %0":"=m"(B_mmx[0]));
+
+
+
 
 #ifdef DEBUG
                         int tmp = 0;
@@ -1810,6 +1822,7 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                                         printf("mm4 : 0x%016"PRIx64" -> 0x%016"PRIx64"\n", mm4_before, mm4_after);
                                         printf("mm5 : 0x%016"PRIx64" -> 0x%016"PRIx64"\n", mm5_before, mm5_after);
                                         printf("\n");
+#endif
                                 }
                                 //assert(R[tmp] == R_mmx[tmp]);
                                 //assert(G[tmp] == G_mmx[tmp]);
