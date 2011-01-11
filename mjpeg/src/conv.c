@@ -30,7 +30,9 @@
  * 3 : Chargement dans mmx
  * 4 : soustraction 128 par packets
  * 5 : calcul de R
- * 6 : calcul de GB
+ * 6 : calcul de RGB
+ * 7 : récupération de RGB
+ * 8 : récupération de MCU_RGB (allégement du débug des étapes précédentes)
  */
 #define VERSION 8
 #define DEBUG
@@ -1807,14 +1809,6 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                                         printf("mm3 : 0x%016"PRIx64" -> 0x%016"PRIx64"\n", mm3_before, mm3_after);
                                         printf("mm4 : 0x%016"PRIx64" -> 0x%016"PRIx64"\n", mm4_before, mm4_after);
                                         printf("mm5 : 0x%016"PRIx64" -> 0x%016"PRIx64"\n", mm5_before, mm5_after);
-
-#endif
-                                        printf("R_the[%d] = 0x%04"PRIx32"\n", tmp, R[tmp]);
-                                        printf("R_mmx[%d] = 0x%04"PRIx32"\n", tmp, R_mmx[tmp]);
-                                        printf("G_the[%d] = 0x%04"PRIx32"\n", tmp, G[tmp]);
-                                        printf("G_mmx[%d] = 0x%04"PRIx32"\n", tmp, G_mmx[tmp]);
-                                        printf("B_the[%d] = 0x%04"PRIx32"\n", tmp, B[tmp]);
-                                        printf("B_mmx[%d] = 0x%04"PRIx32"\n", tmp, B_mmx[tmp]);
                                         printf("\n");
                                 }
                                 //assert(R[tmp] == R_mmx[tmp]);
@@ -1835,18 +1829,13 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
 }
 #endif
 
-
 #if VERSION == 8
 
 
 void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, uint32_t nb_MCU_V)
 {
         uint8_t *MCU_Y, *MCU_Cr, *MCU_Cb;
-        uint8_t index, i, j, idx;
-        uint32_t ARGB[4];
-        uint8_t R_mmx[4] = { 0 };
-        uint8_t G_mmx[4] = { 0 };
-        uint8_t B_mmx[4] = { 0 };
+        uint8_t index, i, j;
 
         // Soustraction de 128 sur chacun des 16bits d'un registre mmx
         const uint64_t magic_substract = 0x0080008000800080;
@@ -1873,167 +1862,84 @@ void YCrCb_to_ARGB(uint8_t *YCrCb_MCU[3], uint32_t *RGB_MCU, uint32_t nb_MCU_H, 
                         index = i * (8 * nb_MCU_H) + j;
 
                         // chargement de Y dans mm0
-                        // 0x00 | MCU_Y[index + 3] | 0x00 | MCU_Y[index + 2] |
-                        // 0x00 | MCU_Y[index + 1] | 0x00 | MCU_Y[index + 0] -> %mm0
-                        //
                         __asm__("pxor %mm7, %mm7");
                         __asm__("movq %0, %%mm0"::"m"(MCU_Y[index]));
                         __asm__("punpcklbw %mm7, %mm0");
-                        // chargement de CR -> mm1
+                        // chargement de CR - 128 -> mm1
                         __asm__("pxor %mm7, %mm7");
                         __asm__("movq %0, %%mm1"::"m"(MCU_Cr[index]));
                         __asm__("punpcklbw %mm7, %mm1");
-                        // soustraction CR -128
                         __asm__("psubw %0, %%mm1"::"m"(magic_substract));
-                        // chargement CB -> mm2
+                        // chargement CB - 128 -> mm2
                         __asm__("movq %0, %%mm2"::"m"(MCU_Cb[index]));
                         __asm__("punpcklbw %mm7, %mm2");
-                        // soustraction CB - 128
                         __asm__("psubw %0, %%mm2"::"m"(magic_substract));
-                        /* on va faire dans l'ordre
-                         * 	calcul de G
-                         * 	calcul de R
-                         * 	calcul de B
-                         * 	On fait G en premier car on a besoin de plus de registres pour le calculer
-                         */
-                        /*
-                         * * * * * * * *
-                         * Calcul de G *
-                         * * * * * * * *
-                         *
-                         * G = ((Y << 8) - ((Cr - 128) * 183) - ((Cb - 128) * 88)) >> 8
-                         *
-                         * On dévelloppe le >> 8, car ici c'est autorisé
-                         *              G = Y - ((MM1 * 183) + (MM2 * 88)) >> 8
-                         *
-                         */
-
-                        /*
-                         * multiplication Cr
-                         */
+                        // Calcul de G
                         __asm__("movq %mm1, %mm4");
                         __asm__("movq %mm4, %mm7");
                         __asm__("pmullw %0, %%mm4"::"m"(G_cr_mult_constant));
-                        // la partie haute vaut soit 0000 soit ffff, pour dire le signe
                         __asm__("pmulhw %0, %%mm7"::"m"(G_cr_mult_constant));
-                        // on va passer sur 4 entiers de 32 bits
                         __asm__("movq %mm4, %mm5");
                         __asm__("punpcklwd %mm7, %mm4");
                         __asm__("punpckhwd %mm7, %mm5");
-                        /*
-                         * multiplication Cb
-                         */
                         __asm__("movq %mm2, %mm6");
                         __asm__("movq %mm6, %mm7");
                         __asm__("pmullw %0, %%mm6"::"m"(G_cb_mult_constant));
-                        // la partie haute vaut soit 0000 soit ffff, pour dire le signe
                         __asm__("pmulhw %0, %%mm7"::"m"(G_cb_mult_constant));
-                        // on va passer sur 4 entiers de 32 bits
-                        // On va utiliser mm3 comme temporaire
                         __asm__("movq %mm6, %mm3");
                         __asm__("punpcklwd %mm7, %mm6");
                         __asm__("punpckhwd %mm7, %mm3");
                         __asm__("movq %mm3, %mm7");
-                        // on va additionner
                         __asm__("paddd %mm4, %mm6");
                         __asm__("paddd %mm5, %mm7");
-                        // passage en négatif
                         __asm__("pxor %mm4, %mm4");
                         __asm__("pxor %mm5, %mm5");
                         __asm__("psubd %mm6, %mm4");
                         __asm__("psubd %mm7, %mm5");
-                        // on fait le décalage arithmétique à droite de 8
                         __asm__("psrad $8, %mm4");
                         __asm__("psrad $8, %mm5");
-                        // on va repasser sur 16 bits
                         __asm__("packssdw %mm5, %mm4");
-
                         __asm__("paddsw %mm0, %mm4");
-
-                        /*
-                         * * * * * * * *
-                         * Calcul de R *
-                         * * * * * * * *
-                         *
-                         * R = (((Y << 8) + (Cr - 128) * 359)) >> 8
-                         * On dévelloppe le >> 8, car ici c'est autorisé
-                         * R = (MM0)  +   ((MM1) * 359) >> 8
-                         *
-                         */
-
-                        /*
-                         * multiplication
-                         */
+                        // Calcul de R
                         __asm__("movq %mm1, %mm3");
                         __asm__("movq %mm3, %mm6");
                         __asm__("pmullw %0, %%mm3"::"m"(R_mult_constant));
-                        // la partie haute vaut soit 0000 soit ffff, pour dire le signe
-                        // l'information dans la partie basse n'est pas suffisante
-                        // exemple tiré du traitement d'une image
-                        // 	High mult vaut 0x0000000000000000
-                        // 	low mult vaut  0x91d891d88c3c8c3c
-                        // En regardant uniquement la partie basse,
-                        // on pourrait croire que c'est un nombre négatif mais il est positif
                         __asm__("pmulhw %0, %%mm6"::"m"(R_mult_constant));
-                        // on va passer sur 4 entiers de 32 bits
                         __asm__("movq %mm3, %mm7");
                         __asm__("punpcklwd %mm6, %mm3");
                         __asm__("punpckhwd %mm6, %mm7");
-                        // on fait le décalage arithmétique à droite de 8
                         __asm__("psrad $8, %mm3");
                         __asm__("psrad $8, %mm7");
-                        // on va repasser sur 16 bits
                         __asm__("packssdw %mm7, %mm3");
-                        // addition
                         __asm__("paddw %mm0, %mm3");
-
-                        /*
-                         * * * * * * * *
-                         * Calcul de B *
-                         * * * * * * * *
-                         *
-                         * R = (((Y << 8) + (Cb - 128) * 455)) >> 8
-                         * On dévelloppe le >> 8, car ici c'est autorisé
-                         * R = (MM0)  +   ((MM1) * 455) >> 8
-                         *
-                         */
-
-                        /*
-                         * multiplication
-                         */
+                        // Calcul de B 
                         __asm__("movq %mm2, %mm5");
                         __asm__("movq %mm5, %mm6");
                         __asm__("pmullw %0, %%mm5"::"m"(B_cb_mult_constant));
                         __asm__("pmulhw %0, %%mm6"::"m"(B_cb_mult_constant));
-
-                        // on va passer sur 4 entiers de 32 bits
                         __asm__("movq %mm5, %mm7");
                         __asm__("punpcklwd %mm6, %mm5");
                         __asm__("punpckhwd %mm6, %mm7");
-                        // on fait le décalage arithmétique à droite de 8
                         __asm__("psrad $8, %mm5");
                         __asm__("psrad $8, %mm7");
-                        // on va repasser sur 16 bits
                         __asm__("packssdw %mm7, %mm5");
-                        // addition
                         __asm__("paddw %mm0, %mm5");
-
                         // Récupération des valeurs pour les mettres dans ARGB
                         __asm__("packuswb %mm7, %mm3");
                         __asm__("packuswb %mm7, %mm4");
                         __asm__("packuswb %mm7, %mm5");
 
-                        __asm__("movd %%mm3, %0":"=m"(R_mmx[0]));
-                        __asm__("movd %%mm4, %0":"=m"(G_mmx[0]));
-                        __asm__("movd %%mm5, %0":"=m"(B_mmx[0]));
 
+                        __asm__("pxor %mm7, %mm7");
+                        __asm__("punpcklbw %mm7, %mm3");
+                        __asm__("punpcklbw %mm4, %mm5");
+                        __asm__("movq %mm5, %mm4");
+                        __asm__("punpckhwd %mm3, %mm5");
+                        __asm__("punpcklwd %mm3, %mm4");
 
-                        for (idx = 0; idx < 4; idx++) {
-                                ARGB[idx] = ((R_mmx[idx] & 0xff) << 16) |
-                                        ((G_mmx[idx] & 0xff) << 8) |
-                                        (B_mmx[idx] & 0xff);
-                                RGB_MCU[index + idx] = ARGB[idx];
-                        }
+                        __asm__("movd %%mm4, %0":"=m"(RGB_MCU[index]));
+                        __asm__("movd %%mm5, %0":"=m"(RGB_MCU[index + 2]));
+
                 }
         }
 }
